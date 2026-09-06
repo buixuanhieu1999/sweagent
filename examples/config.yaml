@@ -1,7 +1,7 @@
 provider:
   type: ollama
   host: https://ollama.com/api
-  model: gemma4:31b
+  model: gpt-oss:120b
   stream: true
   keep_alive: 10m
   timeout: 180

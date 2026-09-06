@@ -1,6 +1,6 @@
 ﻿# Unified Interactive Coding Agent
 
-Coding agent thực thi công cụ trên môi trường local, dùng **Ollama Cloud với `gemma4:31b`** và nhận yêu cầu bằng hội thoại liên tục. Đây là bản nâng cấp từ `agent.py` chạy một task qua shell sang runtime có provider độc lập, công cụ riêng, vai trò chuyên biệt và lưu phiên.
+Coding agent thực thi công cụ trên môi trường local, dùng **Ollama Cloud với `gpt-oss:120b`** và nhận yêu cầu bằng hội thoại liên tục. Đây là bản nâng cấp từ `agent.py` chạy một task qua shell sang runtime có provider độc lập, công cụ riêng, vai trò chuyên biệt và lưu phiên.
 
 ## Chạy nhanh
 
@@ -11,7 +11,7 @@ python -m pip install -e .
 agent
 ```
 
-Mặc định là `https://ollama.com/api`, model `gemma4:31b`. Mở đúng project này bằng launcher PowerShell:
+Mặc định là `https://ollama.com/api`, model `gpt-oss:120b`. Mở đúng project này bằng launcher PowerShell:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-agent.ps1
@@ -20,7 +20,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-agent.ps1
 Có thể chạy từ source mà không cài console command:
 
 ```powershell
-python agent.py --repo C:\code\my-project --host https://ollama.com/api --model gemma4:31b
+python agent.py --repo C:\code\my-project --host https://ollama.com/api --model gpt-oss:120b
 ```
 
 Chạy agent ở bất kỳ repo nào với toàn quyền local, không permission prompt hay rule từng command:
@@ -69,7 +69,7 @@ Thứ tự ưu tiên provider: CLI > biến môi trường > `.env` cạnh sourc
 provider:
   type: ollama
   host: https://ollama.com/api
-  model: gemma4:31b
+  model: gpt-oss:120b
   stream: true
   keep_alive: 10m
 agent:
@@ -203,6 +203,6 @@ python -m unittest discover -v
 python -m ruff check unified_agent tests agent.py
 ```
 
-Bộ test nằm trong `tests/`, bao gồm loop tổng quát không router, workspace context và scope instructions, code-intelligence fallback/LSP, monorepo `cwd`, skills, subagent profile, parsed argv permission rules/session grant/SQLite audit, session resume, compaction, undo/redo, timeout, BM25/SBFL và streaming tool fragments. Các test này không đo chất lượng model. Cấu hình Cloud đã được kiểm tra bằng một request thật tới `gemma4:31b`; chạy agent cần kết nối Internet và API key hợp lệ.
+Bộ test nằm trong `tests/`, bao gồm loop tổng quát không router, workspace context và scope instructions, code-intelligence fallback/LSP, monorepo `cwd`, skills, subagent profile, parsed argv permission rules/session grant/SQLite audit, session resume, compaction, undo/redo, timeout, BM25/SBFL và streaming tool fragments. Các test này không đo chất lượng model. Chạy agent cần kết nối Internet và API key hợp lệ.
 
 API adapter đối chiếu với [Ollama Chat API](https://docs.ollama.com/api/chat) và [Ollama Tool Calling](https://docs.ollama.com/capabilities/tool-calling).

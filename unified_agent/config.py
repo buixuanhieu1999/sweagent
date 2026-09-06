@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_HOST = "https://ollama.com/api"
-DEFAULT_MODEL = "gemma4:31b"
+DEFAULT_MODEL = "gpt-oss:120b"
 
 
 def load_mapping(path: Path) -> dict[str, Any]:
