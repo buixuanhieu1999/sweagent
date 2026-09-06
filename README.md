@@ -89,6 +89,7 @@ API key từ `OLLAMA_API_KEY` chỉ được tự lấy khi endpoint là `ollama
 ## Luồng thực thi
 
 - Runtime dùng một vòng lặp chung: model tự chọn tool, subagent hoặc skill theo evidence hiện có. Không còn router `brownfield`/`greenfield`, keyword bug/feature, hay chuỗi stage bắt buộc.
+- Mỗi yêu cầu có Turn lifecycle bền vững. `plan.update` là context có thể sửa, `user.question` dừng Turn để chờ cùng session trả lời, và loop guard cảnh báo/chặn tool call lặp lại không tiến triển.
 - `workspace.context` là tool tùy chọn, chỉ trả `cwd`, worktree Git, workspace roots, instruction-file chain và shallow tree. Nó không nhận diện ngôn ngữ, framework, package manager hay tự chọn lệnh build/test.
 - Các subagent `explore`, `architect`, `reviewer` có context riêng và profile tool hạn chế; main agent chỉ gọi khi hữu ích. Skills `issue-resolution`, `project-planning`, `test-generation`, `code-review` cũng chỉ được load khi cần.
 - Tool names công khai theo capability (`workspace.context`, `fs.read`, `patch.apply`, `test.run`, `code.definition`, `subagent`, `skill.load`). Tên cũ chỉ được giữ nội bộ để đọc trajectory cũ.
@@ -103,12 +104,26 @@ API key từ `OLLAMA_API_KEY` chỉ được tự lấy khi endpoint là `ollama
 | `fs.read`, `fs.glob`, `search.grep` | Đọc theo dòng, tìm file, tìm văn bản literal; bỏ qua thư mục sinh tự động và `.env` |
 | `fs.write`, `patch.apply` | Tạo file mới hoặc thay một đoạn khớp chính xác duy nhất; bảo toàn CRLF |
 | `terminal.exec`, `test.run` | Chạy lệnh local không tương tác tại `cwd` chỉ định, timeout, ghi exit code và output có giới hạn |
-| `git.read`, `search.bm25`, `code.definition`, `code.references`, `code.symbols`, `code.structure`, `code.diagnostics` | Điều hướng và bằng chứng source code qua code-intelligence layer |
+| `plan.update`, `user.question` | Plan mutable và câu hỏi chặn Turn chờ câu trả lời trong cùng context |
+| `agent.spawn`, `agent.send`, `agent.wait`, `agent.resume`, `agent.close` | Quản lý child agent độc lập; parent chỉ wait khi cần kết quả |
+| `tool.search` | Discover và bật deferred capability cho các inference sau |
+| `git.read`, `search.bm25`, `code.*`, `fault.*` | Điều hướng, code intelligence và fault localization; các capability nâng cao là deferred |
+| `web.search`, `web.fetch`, `mcp.*` | Deferred external capability; web và MCP chỉ xuất hiện sau `tool.search` |
 | `fault.coverage`, `fault.localize` | Nhập coverage có test context; xếp hạng dòng/symbol bằng Ochiai, Tarantula hoặc DStar |
 | `skill.list`, `skill.load`, `subagent` | Guidance tùy chọn và delegated exploration/design/review |
 | `artifact.save`, `submit` | Artifact bất kỳ trong run và completion summary tùy chọn |
 
 Workspace chỉ là ranh giới thư mục. Model tự đọc `AGENTS.md`, manifest, CI và tài liệu khi cần để hiểu repo, rồi tự chọn lệnh validation có bằng chứng. `test.run` không suy đoán test runner từ ngôn ngữ. Với monorepo, truyền `cwd` tương đối với worktree, ví dụ `frontend` hoặc `backend`, cho `terminal.exec` và `test.run`.
+
+Mặc định model chỉ thấy core tools. Khi cần semantic code lookup, SBFL, web hoặc MCP, model gọi `tool.search`; tool được discover sẽ xuất hiện ở inference tiếp theo. Project có thể thêm plugin Python tại `.agent/extensions/*.py`, export `extension.tools()` với `ExtensionTool`; plugin deferred cũng đi qua `tool.search` và permission runtime.
+
+MCP server dùng cấu hình argv tại `.agent/mcp.yaml`, sau đó model discover `mcp`, gọi `mcp.connect`, và các tool server xuất hiện dưới namespace `mcp.<server>.<tool>`:
+
+```yaml
+servers:
+  github:
+    command: [npx, -y, "@modelcontextprotocol/server-github"]
+```
 
 Code intelligence được tách khỏi workspace. `code.definition`, `code.references` và `code.diagnostics` ưu tiên LSP khi một server đã được cấu hình; nếu không có server, definition/references/symbols/structure dùng fallback source tổng quát. LSP được lazy-activate theo file mở và dùng language root gần nhất trong monorepo. Có thể đặt command dùng chung bằng `lsp.command`, hoặc chọn server theo language ID:
 
@@ -161,6 +176,9 @@ Khi mở tương tác, CLI phát hiện phiên chưa xong và cho phép khôi ph
 | `/diff` | Diff tích lũy của phiên, kể cả file mới |
 | `/test [command]` | Chạy validation cấu hình hoặc lệnh test nhập trực tiếp |
 | `/review` | Review thay đổi hiện tại |
+| `/plan` | Xem plan mutable hiện tại |
+| `/queue <request>` | Xếp follow-up FIFO sau Turn hiện tại |
+| `/interrupt` | Đánh dấu Turn interrupted; `Ctrl+C` dừng work đang chạy |
 | `/compact` | Thu gọn ngữ cảnh cũ |
 | `/memory [lesson]` | Tra cứu experience hoặc lưu bài học |
 | `/model [name]` | Xem/đổi model chính, lưu lựa chọn trong phiên |
@@ -173,7 +191,7 @@ Undo/redo kiểm tra nội dung hiện tại của tất cả file trước khi 
 
 ## Quyền và giới hạn
 
-Permission tách ba phần: access profile (`inspect`, `workspace`, `full`), approval policy (`on-request`, `never`) và argv-prefix rules. Mặc định là `workspace` + `on-request`: đọc/tìm/sửa trong workspace được phép; command shell chưa có rule sẽ hỏi. `never` từ chối action cần hỏi, không tự cho phép chúng. `full` chỉ user bật rõ ràng.
+Permission tách ba phần: access profile (`inspect`, `workspace`, `full`), approval policy (`on-request`, `never`) và argv-prefix rules. Mặc định là `workspace` + `on-request`: đọc/tìm/sửa trong workspace được phép; command shell chưa có rule sẽ hỏi. `never` từ chối action cần hỏi, không tự cho phép chúng. `--full-access` bật profile `full`: tất cả tool, command, network và rule đều được phép không prompt.
 
 Rule nằm ở `.agent/rules.yaml` (mẫu: [permissions.yaml](C:/Users/AD/Downloads/sweagent/examples/permissions.yaml)); có thể có thêm user rules tại `~/.config/unified-agent/rules.yaml`. Rule dùng argv prefix, không match raw shell string. Compound command, substitution và redirection luôn cần duyệt. Quyết định `deny` luôn thắng; duyệt một lần hoặc theo phiên không tự biến thành persistent rule. Mọi quyết định được audit tại `.agent/permissions.sqlite3`.
 
@@ -191,7 +209,10 @@ Rule nằm ở `.agent/rules.yaml` (mẫu: [permissions.yaml](C:/Users/AD/Downlo
 | Memory | JSON portable state + SQLite session/message/checkpoint index + compaction |
 | Code intelligence | Service/registry riêng; LSP lazy fallback generic source, language root độc lập workspace root |
 | Execution | `ExecutionBackend` protocol + `LocalExecutionBackend`; sandbox backend có thể thêm sau mà không đổi agent loop |
-| Optional capability | BM25, graph/symbol, coverage-context/SBFL, LSP |
+| Interactive runtime | Turn lifecycle, plan, blocking question, queue, interrupt và loop guard |
+| Multi-agent | Spawn/send/wait/resume/close với child handle và concurrency guard |
+| Dynamic tools | Direct/deferred/hidden catalog, `tool.search`, project extension interface |
+| External capability | `web.search`, `web.fetch`, stdio MCP client với namespaced dynamic tools |
 | Tương lai | Best-of-N, parallel candidates và MCTS sau khi evaluator/validator đủ tin cậy |
 
 Bản này dùng CLI dòng lệnh với streaming, chưa có TUI toàn màn hình. Python dùng AST thật; fallback cho các source format khác đánh dấu `approximate`, nên LSP là lựa chọn chính xác hơn khi server tương ứng đã được cấu hình. `fault.coverage` vẫn nhận định dạng coverage.py có contexts; `fault.localize` nhận spectra tổng quát cho các ecosystem khác. Skills chỉ là guidance và chất lượng reproduce/test generation vẫn phụ thuộc model. Các mẫu kiến trúc trong plan được triển khai độc lập, không import framework MetaGPT/OpenCode.

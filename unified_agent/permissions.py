@@ -186,6 +186,12 @@ class Permissions:
         self.audit = PermissionAudit(root) if root else None
 
     def _profile_decision(self, request: ActionRequest) -> PermissionDecision | None:
+        if request.network and self.profile != "full":
+            return PermissionDecision(
+                "prompt",
+                "Network capability requires approval outside the full profile",
+                "access_profile",
+            )
         if request.action in {
             "read",
             "search",

@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import lsp, search, workspace
+from . import extensions, external, lsp, search, workspace
 from .capabilities import Capability, CapabilityRegistry
 from .code_intelligence import CodeIntelligenceService
 from .execution import BackgroundSpec, CommandSpec, LocalExecutionBackend
 from .memory import Session
+from .mcp import MCPManager
 from .permissions import ActionRequest, Permissions, parse_command
 from .repo import files, read_text, safe_path
 from . import skills
+from .turns import SessionRuntime
+from .tool_catalog import Exposure, ToolCatalog, ToolDescriptor
 
 
 def schema(name, description, properties=None, required=None):
@@ -183,6 +186,28 @@ DEFINITIONS = [
         ["summary"],
     ),
     schema(
+        "plan_update",
+        "Update the mutable task plan. Plans provide context only; they never trigger execution automatically.",
+        {
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"text": S, "status": S},
+                    "required": ["text", "status"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        ["steps"],
+    ),
+    schema(
+        "user_question",
+        "Ask the user a focused question when their decision is required. This pauses the current turn until they answer.",
+        {"question": S, "options": {"type": "array", "items": S}},
+        ["question", "options"],
+    ),
+    schema(
         "workspace_context",
         "Return workspace boundary facts only: current directory, enclosing worktree root, instruction-file chain, trust, and an optional shallow tree. It never classifies the project or suggests commands.",
     ),
@@ -224,6 +249,67 @@ DEFINITIONS = [
         {"name": S},
         ["name"],
     ),
+    schema(
+        "tool_search",
+        "Discover deferred capabilities by a short description, then make matching tools available for later turns.",
+        {"query": S},
+        ["query"],
+    ),
+    schema(
+        "web_search",
+        "Search the public web for current documentation or research. This is a deferred network capability.",
+        {"query": S},
+        ["query"],
+    ),
+    schema(
+        "web_fetch",
+        "Fetch an http(s) page and return cleaned, bounded text. This is a deferred network capability.",
+        {"url": S, "max_chars": INTEGER},
+        ["url"],
+    ),
+    schema(
+        "agent_spawn",
+        "Start an optional child agent with fresh task context. The parent may continue before waiting for it.",
+        {"role": S, "task": S},
+        ["role", "task"],
+    ),
+    schema(
+        "agent_send",
+        "Send additional task context to a running or completed child agent.",
+        {"agent_id": S, "message": S},
+        ["agent_id", "message"],
+    ),
+    schema(
+        "agent_wait",
+        "Wait for one or more child agents and collect their current results.",
+        {"agent_ids": {"type": "array", "items": S}},
+        ["agent_ids"],
+    ),
+    schema(
+        "agent_resume",
+        "Resume a completed child agent with optional additional context.",
+        {"agent_id": S, "message": S},
+        ["agent_id"],
+    ),
+    schema(
+        "agent_close",
+        "Close a child agent and discard future work from it.",
+        {"agent_id": S},
+        ["agent_id"],
+    ),
+    schema(
+        "mcp_connect",
+        "Connect a configured stdio MCP server from .agent/mcp.yaml and discover its deferred tools.",
+        {"server": S},
+        ["server"],
+    ),
+    schema(
+        "mcp_disconnect",
+        "Disconnect an MCP server and remove its discovered tools.",
+        {"server": S},
+        ["server"],
+    ),
+    schema("mcp_list_servers", "List currently connected MCP servers."),
 ]
 READ_TOOLS = {
     "read",
@@ -239,6 +325,7 @@ READ_TOOLS = {
     "code_symbols",
     "code_structure",
     "code_diagnostics",
+    "tool_search",
     "localize",
     "coverage",
 }
@@ -268,6 +355,19 @@ PUBLIC_NAMES = {
     "coverage": "fault.coverage",
     "artifact": "artifact.save",
     "delegate": "subagent",
+    "plan_update": "plan.update",
+    "user_question": "user.question",
+    "tool_search": "tool.search",
+    "web_search": "web.search",
+    "web_fetch": "web.fetch",
+    "agent_spawn": "agent.spawn",
+    "agent_send": "agent.send",
+    "agent_wait": "agent.wait",
+    "agent_resume": "agent.resume",
+    "agent_close": "agent.close",
+    "mcp_connect": "mcp.connect",
+    "mcp_disconnect": "mcp.disconnect",
+    "mcp_list_servers": "mcp.list_servers",
     "workspace_context": "workspace.context",
     "code_definition": "code.definition",
     "code_references": "code.references",
@@ -335,11 +435,22 @@ class ToolRegistry:
         )
         self.shell, self.dry_run, self.emit = shell, dry_run, emit
         self.delegate = None
+        self.agent_manager = None
         self.workspace = workspace.context(root)
         if config["execution"]["backend"] != "local":
             raise ValueError("Only the local execution backend is installed")
         self.execution = LocalExecutionBackend()
         self.code = CodeIntelligenceService(root, config)
+        self.catalog = ToolCatalog(
+            [definition["function"]["name"] for definition in DEFINITIONS],
+            HIDDEN_TOOLS,
+        )
+        self.extensions = {tool.name: tool for tool in extensions.discover(root)}
+        self.mcp = MCPManager(root)
+        for tool in self.extensions.values():
+            self.catalog.register(
+                ToolDescriptor(tool.name, "extension", Exposure(tool.exposure))
+            )
         self.capabilities = CapabilityRegistry()
         for definition in DEFINITIONS:
             function = definition["function"]
@@ -367,6 +478,17 @@ class ToolRegistry:
                     effects,
                 )
             )
+        for tool in self.extensions.values():
+            self.capabilities.register(Capability(tool.name, "tool", tool.description))
+
+    def _register_extension(self, tool) -> None:
+        if tool.name in self.extensions:
+            return
+        self.extensions[tool.name] = tool
+        self.catalog.register(
+            ToolDescriptor(tool.name, "extension", Exposure(tool.exposure))
+        )
+        self.capabilities.register(Capability(tool.name, "tool", tool.description))
 
     def _lsp_command(self, path: str) -> list[str]:
         """Compatibility shim for old persisted `code.lsp` calls."""
@@ -391,27 +513,48 @@ class ToolRegistry:
         if internal_role not in ROLE_TOOLS:
             raise PermissionError(f"Unknown tool profile: {role}")
         allowed = ROLE_TOOLS[internal_role]
-        return [
-            _public_schema(d)
-            for d in DEFINITIONS
-            if d["function"]["name"] in allowed
-            and d["function"]["name"] not in HIDDEN_TOOLS
+        enabled = set(self.session.data.setdefault("enabled_tools", []))
+        visible = self.catalog.visible(allowed, enabled)
+        schemas = [
+            _public_schema(d) for d in DEFINITIONS if d["function"]["name"] in visible
         ]
+        if internal_role == "engineer":
+            schemas.extend(
+                schema(tool.name, tool.description, tool.parameters)
+                for tool in self.extensions.values()
+                if tool.exposure == "direct" or tool.name in enabled
+            )
+        return schemas
 
     def execute(self, name: str, arguments: dict, role="build") -> dict:
         try:
             name = PRIVATE_NAMES.get(name, name)
             internal_role = {"build": "engineer", "explore": "explorer"}.get(role, role)
-            if internal_role not in ROLE_TOOLS or name not in ROLE_TOOLS[internal_role]:
+            extension = self.extensions.get(name)
+            if internal_role not in ROLE_TOOLS or (
+                not extension and name not in ROLE_TOOLS[internal_role]
+            ):
                 raise PermissionError(f"Tool {name} is unavailable to {role}")
-            definition = next(
-                d["function"] for d in DEFINITIONS if d["function"]["name"] == name
+            definition = (
+                {
+                    "parameters": {
+                        "type": "object",
+                        "properties": extension.parameters,
+                        "additionalProperties": False,
+                    }
+                }
+                if extension
+                else next(
+                    d["function"] for d in DEFINITIONS if d["function"]["name"] == name
+                )
             )
             validate_value(arguments, definition["parameters"], name)
             self.emit(
                 f"  [{role}] {name}: {str(arguments.get('path', arguments.get('command', arguments.get('query', ''))))[:180]}"
             )
             action = "read"
+            if extension:
+                action = extension.action
             if name in {
                 "grep",
                 "glob",
@@ -441,6 +584,10 @@ class ToolRegistry:
                     action = "lsp_execution"
             elif name == "workspace_context":
                 action = "workspace_inspect"
+            elif name in {"web_search", "web_fetch"}:
+                action = "network"
+            elif name == "mcp_connect":
+                action = "process_execution"
             elif name.startswith("skill."):
                 action = "skill_read"
             detail = str(arguments.get("command", arguments.get("path", name)))
@@ -451,6 +598,9 @@ class ToolRegistry:
             elif name in {"code_definition", "code_references", "code_diagnostics"}:
                 command = " ".join(self.code.configured_command(arguments["path"]))
                 detail = command or detail
+            elif name == "mcp_connect":
+                command = " ".join(self.mcp.configured(arguments["server"]))
+                detail = command
             if self.dry_run and name in {
                 "write",
                 "patch",
@@ -478,12 +628,18 @@ class ToolRegistry:
                     (arguments["path"],)
                     if isinstance(arguments.get("path"), str)
                     else (),
+                    network=name in {"web_search", "web_fetch"}
+                    or bool(extension and extension.action == "network"),
                     reason=arguments.get("reason", ""),
                 )
             )
             if decision.decision != "allow":
                 raise PermissionError(f"Denied by permission policy: {decision.reason}")
-            result = self._execute(name, arguments, internal_role)
+            result = (
+                extension.executor(arguments)
+                if extension
+                else self._execute(name, arguments, internal_role)
+            )
             return (
                 result
                 if isinstance(result, dict) and "ok" in result
@@ -635,6 +791,15 @@ class ToolRegistry:
             symbols = search.symbols(
                 self.root, a.get("query", "") if name == "ast" else ""
             )
+            return (
+                symbols
+                if name == "ast"
+                else [
+                    s
+                    for s in symbols
+                    if any(a["query"].lower() in c.lower() for c in s["calls"])
+                ]
+            )
         if name == "code_definition":
             return self.code.definition(
                 a["path"], a.get("line", 1), a.get("character", 1)
@@ -649,15 +814,6 @@ class ToolRegistry:
             return self.code.structure(a["path"])
         if name == "code_diagnostics":
             return self.code.diagnostics(a["path"])
-            return (
-                symbols
-                if name == "ast"
-                else [
-                    s
-                    for s in symbols
-                    if any(a["query"].lower() in c.lower() for c in s["calls"])
-                ]
-            )
         if name == "localize":
             result = search.localize(**a)
             self.session.artifact("localization.yaml", json.dumps(result, indent=2))
@@ -692,6 +848,65 @@ class ToolRegistry:
             ]
         if name == "skill.load":
             return skills.load(self.root, a["name"])
+        if name == "tool_search":
+            found = self.catalog.search(a["query"])
+            enabled = set(self.session.data.setdefault("enabled_tools", []))
+            enabled.update(item.name for item in found)
+            self.session.data["enabled_tools"] = sorted(enabled)
+            return [
+                {
+                    "name": PUBLIC_NAMES.get(item.name, item.name),
+                    "category": item.category,
+                    "exposure": item.exposure,
+                }
+                for item in found
+            ]
+        if name == "web_search":
+            return external.search(a["query"])
+        if name == "web_fetch":
+            return external.fetch(a["url"], a.get("max_chars", 16_000))
+        if name == "mcp_connect":
+            tools = self.mcp.connect(a["server"])
+            for tool in tools:
+                self._register_extension(tool)
+            enabled = set(self.session.data.setdefault("enabled_tools", []))
+            enabled.update(tool.name for tool in tools)
+            self.session.data["enabled_tools"] = sorted(enabled)
+            return {"server": a["server"], "tools": [tool.name for tool in tools]}
+        if name == "mcp_disconnect":
+            prefix = "mcp." + a["server"] + "."
+            self.mcp.disconnect(a["server"])
+            for tool_name in [
+                name for name in self.extensions if name.startswith(prefix)
+            ]:
+                self.extensions.pop(tool_name)
+                self.catalog.unregister(tool_name)
+            self.session.data["enabled_tools"] = [
+                tool_name
+                for tool_name in self.session.data.get("enabled_tools", [])
+                if not tool_name.startswith(prefix)
+            ]
+            return {"server": a["server"], "disconnected": True}
+        if name == "mcp_list_servers":
+            return self.mcp.list_servers()
+        if name.startswith("agent_"):
+            if not self.agent_manager:
+                raise RuntimeError("Agent manager is unavailable in this context")
+            if name == "agent_spawn":
+                return self.agent_manager.public(
+                    self.agent_manager.spawn(a["role"], a["task"])
+                )
+            if name == "agent_send":
+                self.agent_manager.send(a["agent_id"], a["message"])
+                return {"agent_id": a["agent_id"], "sent": True}
+            if name == "agent_wait":
+                return self.agent_manager.wait(a["agent_ids"])
+            if name == "agent_resume":
+                return self.agent_manager.public(
+                    self.agent_manager.resume(a["agent_id"], a.get("message", ""))
+                )
+            self.agent_manager.close(a["agent_id"])
+            return {"agent_id": a["agent_id"], "closed": True}
         if name in {"delegate", "subagent"}:
             if not self.delegate:
                 raise RuntimeError("Delegation is unavailable in this context")
@@ -700,5 +915,12 @@ class ToolRegistry:
             return {
                 "summary": a["summary"],
                 "validation_note": a.get("validation_note", ""),
+            }
+        if name == "plan_update":
+            return {"steps": SessionRuntime(self.session).update_plan(a["steps"])}
+        if name == "user_question":
+            return {
+                "blocked": True,
+                **SessionRuntime(self.session).question(a["question"], a["options"]),
             }
         raise ValueError(f"Unknown tool {name}")

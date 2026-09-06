@@ -8,13 +8,16 @@ observations supply the capabilities from which a trajectory is chosen.
 from __future__ import annotations
 
 import json
+import threading
 
+from .agent_manager import AgentManager
 from .agents import AgentProfile, builtin_agents
 from .legacy import arguments_for
 from .memory import History, Session, compact, diff_snapshots, snapshot
 from . import workspace
 from .terminal import select_shell
 from .tools import ToolRegistry
+from .turns import SessionRuntime, ToolLoopGuard, TurnState
 
 SYSTEM = """You are an interactive coding agent operating in the user's current workspace.
 Respond in the user's language and preserve their constraints across the session.
@@ -58,13 +61,25 @@ class MainAgent:
             emit,
         )
         self.calls = 0
+        self._chat_lock = threading.Lock()
         self.history = History(session)
+        self.runtime = SessionRuntime(session)
+        self.loop_guard = ToolLoopGuard(session)
         self.agents = builtin_agents()
         self.tools.delegate = self.subagent
+        self.agent_manager = AgentManager(self._run_managed_child)
+        self.tools.agent_manager = self.agent_manager
+
+    def _run_managed_child(self, handle) -> dict:
+        extra = "\n".join(handle.inbox)
+        task = handle.task + ("\nAdditional user context:\n" + extra if extra else "")
+        return self.subagent(handle.role, task)
 
     def system_prompt(self, profile: AgentProfile | None = None) -> str:
         available = ", ".join(self.agents.names())
-        tools = ", ".join(item.name for item in self.tools.capabilities.list())
+        tools = ", ".join(
+            item["function"]["name"] for item in self.tools.schemas_for("build")
+        )
         text = (
             SYSTEM
             + f"\nWorkspace: {self.session.root}\nShell: {select_shell(self.tools.shell)[0]}"
@@ -72,29 +87,44 @@ class MainAgent:
             + "\nWorkspace instructions:\n"
             + workspace.instructions(workspace.context(self.session.root))
         )
+        if plan := self.session.data.get("plan"):
+            text += "\nCurrent mutable plan (context only):\n" + json.dumps(
+                plan, ensure_ascii=False
+            )
         return text + ("\nDelegated role:\n" + profile.prompt if profile else "")
 
     def state(self, name: str):
+        lifecycle = {
+            "RUNNING": TurnState.RUNNING,
+            "BLOCKED_USER": TurnState.BLOCKED_USER,
+            "INTERRUPTED": TurnState.INTERRUPTED,
+            "ERROR": TurnState.FAILED,
+            "STEP_LIMIT": TurnState.FAILED,
+            "READY": TurnState.COMPLETE,
+        }.get(name)
+        if lifecycle:
+            self.runtime.state(lifecycle)
         self.session.data["state"] = name
         self.session.save()
         self.emit(f"[{name.lower()}]")
 
     def chat(self, messages, role="build", tools=None, *, stream=False, schema=None):
-        if self.calls >= self.config["agent"]["max_steps"]:
-            raise BudgetExceeded(
-                "Model request limit reached; the session was saved and can be resumed."
+        with self._chat_lock:
+            if self.calls >= self.config["agent"]["max_steps"]:
+                raise BudgetExceeded(
+                    "Model request limit reached; the session was saved and can be resumed."
+                )
+            self.calls += 1
+            response = self.provider.chat(
+                messages,
+                tools,
+                model=self.config["models"].get(role),
+                response_schema=schema,
+                stream=stream and self.config["provider"]["stream"],
+                on_text=(lambda text: self.emit(text, end="", flush=True))
+                if stream
+                else None,
             )
-        self.calls += 1
-        response = self.provider.chat(
-            messages,
-            tools,
-            model=self.config["models"].get(role),
-            response_schema=schema,
-            stream=stream and self.config["provider"]["stream"],
-            on_text=(lambda text: self.emit(text, end="", flush=True))
-            if stream
-            else None,
-        )
         if stream and response.content:
             self.emit("")
         self.session.data["model_requests"] = (
@@ -173,7 +203,10 @@ class MainAgent:
         self.calls = 0
         before = snapshot(self.session.root)
         data.setdefault("session_baseline", before)
-        data["turn"] += 1
+        if data.get("pending_question"):
+            request = self.runtime.answer(request)
+        else:
+            self.runtime.start(request)
         data["requests"].append(request)
         data["verification"] = "not_run"
         self.session.artifact("request.md", "\n\n---\n\n".join(data["requests"]))
@@ -205,12 +238,25 @@ class MainAgent:
                     self.state("READY")
                     break
                 completed = False
+                blocked_user = False
                 for call in response.tool_calls:
                     name = call.get("function", {}).get("name", "")
-                    result = self.tools.execute(name, arguments_for(call), "build")
+                    arguments = arguments_for(call)
+                    warning = self.loop_guard.before(name, arguments)
+                    if warning and warning.startswith("Loop detected"):
+                        result = {"ok": False, "error": warning}
+                    else:
+                        result = self.tools.execute(name, arguments, "build")
+                    self.loop_guard.record(name, arguments, result)
+                    if warning and result.get("ok"):
+                        result["warning"] = warning
                     if name == "submit" and result.get("ok"):
                         data["summary"] = result["result"]["summary"]
                         completed = True
+                    if name == "user.question" and result.get("ok"):
+                        question = result.get("result", {})
+                        data["summary"] = "Question: " + question.get("question", "")
+                        blocked_user = question.get("blocked", False)
                     data["messages"].append(
                         {
                             "role": "tool",
@@ -221,6 +267,9 @@ class MainAgent:
                     self.session.save()
                 if completed:
                     self.state("READY")
+                    break
+                if blocked_user:
+                    self.state("BLOCKED_USER")
                     break
         except KeyboardInterrupt:
             data["summary"] = "Interrupted; inspect the workspace before continuing."

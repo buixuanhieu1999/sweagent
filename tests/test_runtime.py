@@ -118,6 +118,25 @@ class RuntimeTests(unittest.TestCase):
         agent.run("this folder already has a README; create a small CLI tool here")
         self.assertEqual(self.session.data["state"], "READY")
         self.assertTrue((self.root / "tool.py").exists())
+
+    def test_question_blocks_then_answer_resumes_same_session_context(self):
+        agent = self.agent(
+            [
+                calls(
+                    (
+                        "user.question",
+                        {"question": "Keep compatibility?", "options": ["yes", "no"]},
+                    )
+                ),
+                ProviderResponse(content="Compatibility will be preserved."),
+            ]
+        )
+        agent.run("Change the API")
+        self.assertEqual(self.session.data["state"], "BLOCKED_USER")
+        self.assertIn("pending_question", self.session.data)
+        agent.run("yes")
+        self.assertEqual(self.session.data["state"], "READY")
+        self.assertNotIn("pending_question", self.session.data)
         self.assertNotIn("route", self.session.data)
 
     def test_subagent_is_model_selected_and_has_fresh_context(self):

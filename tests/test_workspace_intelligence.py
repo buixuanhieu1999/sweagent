@@ -44,10 +44,43 @@ class WorkspaceIntelligenceTests(unittest.TestCase):
         )
         names = {item["function"]["name"] for item in tools.schemas_for()}
         self.assertIn("workspace.context", names)
+        self.assertNotIn("code.definition", names)
+        self.assertNotIn("code.lsp", names)
+        self.assertTrue(
+            tools.execute("tool.search", {"query": "code definition"})["ok"]
+        )
+        names = {item["function"]["name"] for item in tools.schemas_for()}
         self.assertIn("code.definition", names)
         self.assertIn("code.symbols", names)
-        self.assertNotIn("code.lsp", names)
         self.assertEqual(tools._cwd("frontend"), self.root / "frontend")
         self.assertFalse(
             tools.execute("workspace.context", {})["result"].get("language")
+        )
+
+    def test_project_extension_registers_as_a_deferred_tool(self):
+        extension = self.root / ".agent" / "extensions" / "echo.py"
+        extension.parent.mkdir(parents=True)
+        extension.write_text(
+            "from unified_agent.extensions import ExtensionTool\n"
+            "class Extension:\n"
+            "    def tools(self):\n"
+            "        return [ExtensionTool('demo.echo', 'Echo text', {'text': {'type': 'string'}}, lambda args: args)]\n"
+            "extension = Extension()\n"
+        )
+        tools = ToolRegistry(
+            self.root,
+            Session(self.root),
+            Permissions(),
+            load_config(self.root),
+            emit=lambda *args, **kwargs: None,
+        )
+        self.assertNotIn(
+            "demo.echo", {item["function"]["name"] for item in tools.schemas_for()}
+        )
+        tools.execute("tool.search", {"query": "demo echo"})
+        self.assertIn(
+            "demo.echo", {item["function"]["name"] for item in tools.schemas_for()}
+        )
+        self.assertEqual(
+            tools.execute("demo.echo", {"text": "ok"})["result"], {"text": "ok"}
         )

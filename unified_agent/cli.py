@@ -15,6 +15,7 @@ from .provider import OllamaProvider
 from .repo import safe_path
 from .runtime import MainAgent
 from .tools import ToolRegistry
+from .turns import SessionRuntime, TurnState
 
 HELP = """Type a natural-language request to explore, repair or build a project.
 /help                 Show this help
@@ -22,6 +23,9 @@ HELP = """Type a natural-language request to explore, repair or build a project.
 /diff                 Show this session's changes (including new files)
 /test [command]       Run configured checks, or an explicit test command
 /review               Review the current changes
+/plan                 Show the mutable plan for the active session
+/queue <request>      Queue a follow-up to run after the current turn
+/interrupt            Mark the active turn interrupted; Ctrl+C also interrupts running work
 /compact              Summarize old context, preserving recent tool exchanges
 /memory [lesson]      Retrieve experience, or save an explicit lesson
 /model [name]         Show/change the main model for this session
@@ -130,6 +134,8 @@ def command(text, agent: MainAgent):
                         "state",
                         "verification",
                         "model_requests",
+                        "plan",
+                        "runtime",
                     )
                 },
                 ensure_ascii=False,
@@ -159,6 +165,15 @@ def command(text, agent: MainAgent):
             "Review the current project changes. Latest recorded diff:\n"
             + data.get("last_diff", "")
         )
+    elif name == "/plan":
+        print(json.dumps(data.get("plan", []), ensure_ascii=False, indent=2))
+    elif name == "/queue":
+        SessionRuntime(agent.session).enqueue(arg)
+        print("Follow-up queued.")
+    elif name == "/interrupt":
+        SessionRuntime(agent.session).state(TurnState.INTERRUPTED)
+        data["state"] = "INTERRUPTED"
+        print("Turn marked interrupted. Describe how to continue when ready.")
     elif name == "/compact":
         agent.calls = 0
         print(agent.compact())
@@ -359,6 +374,12 @@ def main(argv=None) -> int:
                     print("Started a new session; previous session remains saved.")
             else:
                 agent.run(text)
+                while agent.session.data["state"] == "READY":
+                    follow_up = SessionRuntime(agent.session).next_queued()
+                    if not follow_up:
+                        break
+                    print("[queued follow-up]")
+                    agent.run(follow_up)
             export()
         except EOFError:
             break
