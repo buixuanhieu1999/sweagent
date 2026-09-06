@@ -257,6 +257,22 @@ class RuntimeTests(unittest.TestCase):
         )
         self.assertFalse((self.root / "blocked.py").exists())
 
+    def test_plan_mode_captures_text_when_model_omits_plan_tool(self):
+        self.session.data["collaboration_mode"] = "PLAN"
+        agent = self.agent(
+            [
+                ProviderResponse(
+                    content="1. Update calc.py. 2. Run the regression test."
+                ),
+                ProviderResponse(content="The written plan is complete."),
+            ]
+        )
+        agent.run("Plan the calculation repair")
+        proposed = self.session.data["proposed_plan"]
+        self.assertIsNotNone(proposed)
+        self.assertIn("Update calc.py", proposed["steps"][0]["details"])
+        self.assertEqual(self.session.data["state"], "READY")
+
 
 if __name__ == "__main__":
     unittest.main()

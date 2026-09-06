@@ -259,6 +259,50 @@ class MainAgent:
                 data["messages"].append(response.message())
                 self.session.save()
                 if not response.tool_calls:
+                    if data.get(
+                        "collaboration_mode"
+                    ) == CollaborationMode.PLAN and not data.get("proposed_plan"):
+                        turn = self.runtime.active() or {}
+                        if not turn.get("plan_finalization_requested"):
+                            turn["plan_finalization_requested"] = True
+                            data["messages"].append(
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "Runtime requires a structured ProposedPlan before Plan "
+                                        "Mode can finish. Call plan.propose now using the plan you "
+                                        "just described; do not add implementation changes."
+                                    ),
+                                }
+                            )
+                            self.session.save()
+                            continue
+                        plan_text = "\n\n".join(
+                            message.get("content", "")
+                            for message in data["messages"]
+                            if message.get("role") == "assistant"
+                            and message.get("content", "").strip()
+                        )[-4_000:]
+                        self.runtime.propose(
+                            {
+                                "summary": (
+                                    "Implementation plan captured from the model response."
+                                ),
+                                "steps": [
+                                    {
+                                        "title": "Apply the plan described in this session",
+                                        "files": [],
+                                        "details": plan_text
+                                        or "Inspect the request and implement the described changes.",
+                                    }
+                                ],
+                                "validation": [],
+                                "open_questions": [],
+                            }
+                        )
+                        self.emit(
+                            "[plan saved from text after the model did not call plan.propose]"
+                        )
                     data["summary"] = response.content or "Model returned no response."
                     self.state("READY")
                     break
