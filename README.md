@@ -174,20 +174,27 @@ Khi mở tương tác, CLI phát hiện phiên chưa xong và cho phép khôi ph
 
 | Lệnh | Tác dụng |
 |---|---|
-| `/help`, `/status` | Hướng dẫn và trạng thái |
+| `/help` | Hiện hướng dẫn đầy đủ cho mọi lệnh tương tác. |
+| `/status` | Xem trạng thái Turn, plan, validation, số lần gọi model và queue. |
 | `/diff` | Diff tích lũy của phiên, kể cả file mới |
-| `/test [command]` | Chạy validation cấu hình hoặc lệnh test nhập trực tiếp |
+| `/test` | Chạy các lệnh validation được khai báo trong `.agent/config.yaml`. |
+| `/test <lệnh>` | Chạy một lệnh test cụ thể, ví dụ `/test npm test`. |
 | `/review` | Review thay đổi hiện tại |
 | `/plan` | Xem plan mutable hiện tại |
-| `/queue <request>` | Xếp follow-up FIFO sau Turn hiện tại |
-| `/interrupt` | Đánh dấu Turn interrupted; `Ctrl+C` dừng work đang chạy |
-| `/compact` | Thu gọn ngữ cảnh cũ |
-| `/memory [lesson]` | Tra cứu experience hoặc lưu bài học |
-| `/model [name]` | Xem/đổi model chính, lưu lựa chọn trong phiên |
+| `/queue <yêu cầu>` | Xếp follow-up theo FIFO để chạy sau Turn hiện tại. |
+| `/interrupt` | Đánh dấu Turn interrupted; `Ctrl+C` dừng work đang chạy. |
+| `/compact` | Thu gọn ngữ cảnh cũ và giữ trao đổi tool gần đây. |
+| `/memory` | Tra cứu experience có liên quan đến các yêu cầu đã gửi. |
+| `/memory <ghi chú>` | Lưu một bài học hoặc quy tắc cho project. |
+| `/model` | Xem model chính của session. |
+| `/model <tên-model>` | Đổi model chính cho phần còn lại của session. |
 | `/permissions` | Xem chính sách quyền |
-| `/undo`, `/redo` | Khôi phục thay đổi file của một lượt |
-| `/clear` | Tạo phiên hội thoại mới, giữ dữ liệu phiên cũ |
+| `/undo` | Hoàn tác thay đổi file gần nhất do agent ghi lại. |
+| `/redo` | Áp dụng lại thay đổi vừa undo. |
+| `/clear` | Tạo cuộc hội thoại mới, giữ dữ liệu session cũ. |
 | `/exit` | Lưu và thoát |
+
+Sau `Ctrl+C` hoặc lỗi tạm thời của provider, gõ `continue` hoặc `tiếp tục` như một yêu cầu bình thường để agent tiếp tục. Các lệnh trên chỉ hoạt động trong terminal tương tác; chúng không phải command PowerShell.
 
 Undo/redo kiểm tra nội dung hiện tại của tất cả file trước khi sửa, từ chối nếu có thay đổi tiếp theo của người dùng. Không rollback package cài toàn cục, network, database hay git state. Snapshot bỏ qua file >1 MB, thư mục sinh tự động và secret files; ngân sách snapshot là 32 MB/10.000 file. Với repo lớn, các giới hạn này cũng giới hạn phạm vi diff/undo. Agent không dùng git reset để undo.
 

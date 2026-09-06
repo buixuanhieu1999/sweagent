@@ -17,23 +17,34 @@ from .runtime import MainAgent
 from .tools import ToolRegistry
 from .turns import SessionRuntime, TurnState
 
-HELP = """Type a natural-language request to explore, repair or build a project.
-/help                 Show this help
-/status               Show session state, validation and request count
-/diff                 Show this session's changes (including new files)
-/test [command]       Run configured checks, or an explicit test command
-/review               Review the current changes
-/plan                 Show the mutable plan for the active session
-/queue <request>      Queue a follow-up to run after the current turn
-/interrupt            Mark the active turn interrupted; Ctrl+C also interrupts running work
-/compact              Summarize old context, preserving recent tool exchanges
-/memory [lesson]      Retrieve experience, or save an explicit lesson
-/model [name]         Show/change the main model for this session
-/permissions          Show the effective policy
-/undo, /redo          Restore the previous/next recorded file change
-/clear                Start a fresh conversation in a new saved session
-/exit                 Save and exit
-Ctrl+C interrupts work; type 'continue' or 'tiếp tục' to continue.
+HELP = """Gõ yêu cầu bằng ngôn ngữ tự nhiên để agent khám phá, sửa hoặc xây dựng project.
+
+Quản lý phiên
+  /help                 Hiện hướng dẫn này.
+  /status               Xem trạng thái, plan, số model request và kết quả validation.
+  /diff                 Xem thay đổi tích lũy của phiên, gồm cả file mới.
+  /plan                 Xem plan có thể cập nhật của phiên hiện tại.
+  /queue <yêu cầu>      Xếp một yêu cầu chạy sau khi lượt hiện tại hoàn tất.
+  /interrupt            Đánh dấu lượt hiện tại đã ngắt; Ctrl+C cũng dừng agent đang chạy.
+  /compact              Tóm tắt lịch sử cũ, giữ lại các trao đổi tool gần đây.
+  /clear                Bắt đầu một cuộc hội thoại mới và vẫn giữ session cũ trên đĩa.
+  /exit                 Lưu session rồi thoát.
+
+Kiểm tra và thay đổi
+  /test                 Chạy các lệnh validation trong .agent/config.yaml.
+  /test <lệnh>          Chạy lệnh test cụ thể, ví dụ: /test npm test.
+  /review               Yêu cầu agent review thay đổi hiện tại.
+  /undo                 Hoàn tác thay đổi file gần nhất do agent ghi lại.
+  /redo                 Áp dụng lại thay đổi vừa undo.
+
+Ngữ cảnh và cấu hình
+  /memory               Xem các kinh nghiệm liên quan đến yêu cầu đã gửi.
+  /memory <ghi chú>     Lưu một bài học hoặc quy tắc cho project.
+  /model                Xem model chính của session.
+  /model <tên-model>    Đổi model chính cho phần còn lại của session.
+  /permissions          Xem profile quyền và các rule đang có hiệu lực.
+
+Sau Ctrl+C hoặc lỗi tạm thời, gõ 'continue' hoặc 'tiếp tục' để tiếp tục làm việc.
 """
 
 

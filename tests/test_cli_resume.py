@@ -14,6 +14,11 @@ class ResumePromptTests(unittest.TestCase):
             cli.parse_args(["--max-agent-turns", "20"]).max_agent_turns, 20
         )
 
+    def test_help_describes_interactive_commands_in_vietnamese(self):
+        self.assertIn("/queue <yêu cầu>", cli.HELP)
+        self.assertIn("/test <lệnh>", cli.HELP)
+        self.assertIn("tiếp tục", cli.HELP)
+
     def test_resume_prompt_is_independent_from_permission_prompt(self):
         stdin = Mock()
         stdin.isatty.return_value = True
