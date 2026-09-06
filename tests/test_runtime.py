@@ -1,0 +1,178 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from unified_agent.config import load_config
+from unified_agent.memory import Session
+from unified_agent.permissions import Permissions
+from unified_agent.provider import ProviderResponse
+from unified_agent.runtime import MainAgent
+from unified_agent.tools import ToolRegistry
+
+
+def calls(*items):
+    return ProviderResponse(
+        tool_calls=[
+            {"function": {"name": name, "arguments": args}} for name, args in items
+        ]
+    )
+
+
+class FakeProvider:
+    model = "fake"
+
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.history = []
+
+    def chat(self, messages, tools=None, **kwargs):
+        self.history.append(
+            {"messages": json.loads(json.dumps(messages)), "tools": tools}
+        )
+        item = next(self.responses)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+
+class RuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        (self.root / "calc.py").write_text(
+            "def add(a, b):\n    return a - b\n", encoding="utf-8"
+        )
+        self.config = load_config(self.root)
+        self.config["provider"]["stream"] = False
+        self.config["agent"]["role_steps"] = 3
+        self.session = Session(self.root)
+        self.tools = ToolRegistry(
+            self.root,
+            self.session,
+            Permissions({"shell": {"default": "allow"}}),
+            self.config,
+            emit=lambda *a, **k: None,
+        )
+
+    def agent(self, responses):
+        return MainAgent(
+            FakeProvider(responses),
+            self.session,
+            self.tools,
+            self.config,
+            emit=lambda *a, **k: None,
+        )
+
+    def test_standalone_question_returns_without_workspace_inspection(self):
+        agent = self.agent(
+            [
+                ProviderResponse(
+                    content="Use a strict parser and reject malformed offsets."
+                )
+            ]
+        )
+        agent.run("viết hàm parse timestamp ISO8601")
+        self.assertEqual(self.session.data["state"], "READY")
+        self.assertNotIn("route", self.session.data)
+        names = {
+            tool["function"]["name"] for tool in agent.provider.history[0]["tools"]
+        }
+        self.assertIn("workspace.context", names)
+        self.assertIn("skill.load", names)
+        self.assertNotIn("read", names)
+
+    def test_model_selects_workspace_inspection_for_unseen_failure_phrase(self):
+        agent = self.agent(
+            [
+                calls(("workspace.context", {})),
+                ProviderResponse(
+                    content="I found the available project facts and need the request details."
+                ),
+            ]
+        )
+        agent.run("second request returns 500 only under load")
+        result = next(
+            message
+            for message in self.session.data["messages"]
+            if message.get("tool_name") == "workspace.context"
+        )
+        self.assertTrue(json.loads(result["content"])["ok"])
+        self.assertNotIn("language", result["content"])
+
+    def test_model_can_build_in_existing_workspace_without_mode_switch(self):
+        agent = self.agent(
+            [
+                calls(
+                    ("fs.write", {"path": "tool.py", "content": "def main(): pass\n"})
+                ),
+                calls(
+                    (
+                        "submit",
+                        {"summary": "Created the requested standalone CLI module."},
+                    )
+                ),
+            ]
+        )
+        agent.run("this folder already has a README; create a small CLI tool here")
+        self.assertEqual(self.session.data["state"], "READY")
+        self.assertTrue((self.root / "tool.py").exists())
+        self.assertNotIn("route", self.session.data)
+
+    def test_subagent_is_model_selected_and_has_fresh_context(self):
+        agent = self.agent(
+            [
+                calls(
+                    (
+                        "subagent",
+                        {
+                            "agent": "explore",
+                            "task": "Locate the addition implementation.",
+                        },
+                    )
+                ),
+                ProviderResponse(content="calc.py contains add at line 1."),
+                ProviderResponse(content="The implementation is in calc.py."),
+            ]
+        )
+        agent.run("where is add implemented?")
+        self.assertTrue((self.session.directory / "subagent-explore.md").exists())
+        self.assertEqual(
+            self.session.data["summary"], "The implementation is in calc.py."
+        )
+        self.assertEqual(len(agent.provider.history[1]["messages"]), 2)
+
+    def test_subagent_profile_cannot_modify_source(self):
+        agent = self.agent(
+            [
+                calls(("subagent", {"agent": "explore", "task": "Investigate calc."})),
+                calls(
+                    ("patch.apply", {"path": "calc.py", "old": "a - b", "new": "a + b"})
+                ),
+                ProviderResponse(content="Could not edit; the role is read-only."),
+                ProviderResponse(content="Investigation complete."),
+            ]
+        )
+        agent.run("investigate calc")
+        self.assertIn("a - b", (self.root / "calc.py").read_text())
+
+    def test_provider_error_persists_without_replaying_tool(self):
+        agent = self.agent(
+            [
+                calls(
+                    ("patch.apply", {"path": "calc.py", "old": "a - b", "new": "a + b"})
+                ),
+                RuntimeError("provider disconnected"),
+            ]
+        )
+        agent.run("make transition atomic")
+        self.assertEqual(self.session.data["state"], "ERROR")
+        self.assertIn("a + b", (self.root / "calc.py").read_text())
+        resumed = Session(self.root, self.session.run_id)
+        self.assertEqual(resumed.data["state"], "ERROR")
+        self.assertEqual(len(resumed.data["journal"]), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

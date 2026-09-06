@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unified-local-swe-agent"
+version = "0.2.0"
+description = "Interactive local coding agent with an Ollama provider"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.scripts]
+agent = "unified_agent.cli:entrypoint"
+
+[tool.setuptools.packages.find]
+include = ["unified_agent*"]
+
+[tool.setuptools.package-data]
+unified_agent = ["builtin_skills/*/SKILL.md"]

@@ -1,0 +1,29 @@
+provider:
+  type: ollama
+  host: https://ollama.com/api
+  model: gemma4:31b
+  stream: true
+  keep_alive: 10m
+  timeout: 180
+  # think: false # Only for models supporting this option.
+agent:
+  max_steps: 40
+  role_steps: 10
+  command_timeout: 120
+compaction:
+  enabled: true
+  max_chars: 64000
+  recent_messages: 12
+permissions:
+  file: .agent/rules.yaml
+models: {}
+# Configure commands appropriate for the TARGET project.
+validation: {}
+# validation:
+#   targeted: python -m unittest discover -v
+#   lint: ruff check .
+#   typecheck: mypy src
+lsp: {}
+# Install your language server separately and set its argv:
+# lsp:
+#   command: [pyright-langserver, --stdio]

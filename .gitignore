@@ -1,0 +1,11 @@
+.mini-swe/
+.env
+__pycache__/
+*.py[cod]
+.agent/
+*.egg-info/
+build/
+dist/
+.venv/
+.ruff_cache/
+.pytest_cache/

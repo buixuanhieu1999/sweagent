@@ -1,0 +1,22 @@
+access_profile: workspace
+approval_policy: on-request
+rules:
+  - pattern: [git, status]
+    decision: allow
+    reason: Read-only repository inspection
+  - pattern: [git, diff]
+    decision: allow
+  - pattern: [git, log]
+    decision: allow
+  - pattern: [python, -m, unittest]
+    decision: allow
+  - pattern: [python, -m, pytest]
+    decision: allow
+  - pattern: [pytest]
+    decision: allow
+  - pattern: [git, commit]
+    decision: prompt
+  - pattern: [git, push]
+    decision: prompt
+  - pattern: [sudo]
+    decision: deny
