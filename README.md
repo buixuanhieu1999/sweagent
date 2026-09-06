@@ -1,6 +1,6 @@
 ﻿# Unified Interactive Coding Agent
 
-Coding agent thực thi công cụ trên môi trường local, dùng **Ollama Cloud với `nemotron-3-super:cloud`** và nhận yêu cầu bằng hội thoại liên tục. Đây là bản nâng cấp từ `agent.py` chạy một task qua shell sang runtime có provider độc lập, công cụ riêng, vai trò chuyên biệt và lưu phiên.
+Coding agent thực thi công cụ trên môi trường local, dùng **Ollama Cloud với `nemotron-3-ultra:cloud`** và nhận yêu cầu bằng hội thoại liên tục. Đây là bản nâng cấp từ `agent.py` chạy một task qua shell sang runtime có provider độc lập, công cụ riêng, vai trò chuyên biệt và lưu phiên.
 
 ## Chạy nhanh
 
@@ -11,7 +11,7 @@ python -m pip install -e .
 agent
 ```
 
-Mặc định là `https://ollama.com/api`, model `nemotron-3-super:cloud`. Mở đúng project này bằng launcher PowerShell:
+Mặc định là `https://ollama.com/api`, model `nemotron-3-ultra:cloud`. Mở đúng project này bằng launcher PowerShell:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-agent.ps1
@@ -20,7 +20,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-agent.ps1
 Có thể chạy từ source mà không cài console command:
 
 ```powershell
-python agent.py --repo C:\code\my-project --host https://ollama.com/api --model nemotron-3-super:cloud
+python agent.py --repo C:\code\my-project --host https://ollama.com/api --model nemotron-3-ultra:cloud
 ```
 
 Chạy agent ở bất kỳ repo nào với toàn quyền local, không permission prompt hay rule từng command:
@@ -69,7 +69,7 @@ Thứ tự ưu tiên provider: CLI > biến môi trường > `.env` cạnh sourc
 provider:
   type: ollama
   host: https://ollama.com/api
-  model: nemotron-3-super:cloud
+  model: nemotron-3-ultra:cloud
   stream: true
   keep_alive: 10m
 agent:
