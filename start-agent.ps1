@@ -1,6 +1,7 @@
 param(
     [string]$Repo = $PSScriptRoot,
-    [switch]$FullAccess
+    [switch]$FullAccess,
+    [string]$Task
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,9 @@ try {
     )
     if ($FullAccess) {
         $agentArgs += '--full-access'
+    }
+    if ($Task) {
+        $agentArgs += @('--new-session', '--task', $Task)
     }
     & python @agentArgs
 }

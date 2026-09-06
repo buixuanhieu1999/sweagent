@@ -31,6 +31,12 @@ Chạy agent ở bất kỳ repo nào với toàn quyền local, không permissi
 agent --repo "C:\Users\AD\Downloads\a" --full-access
 ```
 
+Để mở terminal hiển thị và chạy ngay một task mới, truyền thêm `-Task`:
+
+```powershell
+.\start-agent.ps1 -Repo "C:\code\my-project" -FullAccess -Task "Inspect and improve this project."
+```
+
 Sau đó nhập tự nhiên:
 
 ```text
