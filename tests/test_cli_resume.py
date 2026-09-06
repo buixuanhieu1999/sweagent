@@ -8,6 +8,12 @@ class ResumePromptTests(unittest.TestCase):
     def test_full_access_flag_is_available(self):
         self.assertTrue(cli.parse_args(["--full-access"]).full_access)
 
+    def test_agent_turn_cap_is_optional_and_uses_the_public_flag(self):
+        self.assertIsNone(cli.parse_args([]).max_agent_turns)
+        self.assertEqual(
+            cli.parse_args(["--max-agent-turns", "20"]).max_agent_turns, 20
+        )
+
     def test_resume_prompt_is_independent_from_permission_prompt(self):
         stdin = Mock()
         stdin.isatty.return_value = True

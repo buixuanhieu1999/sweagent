@@ -73,14 +73,15 @@ provider:
   stream: true
   keep_alive: 10m
 agent:
-  max_steps: 40
-  role_steps: 10
+  # null = unlimited. Set a number only for evaluation or a fixed budget.
+  max_agent_turns: null
+  max_role_turns: null
   command_timeout: 120
 validation:
   targeted: python -m unittest discover -v
 ```
 
-`max_steps` là tổng số request model mỗi lượt, bao gồm subagent và compaction; `role_steps` giới hạn riêng mỗi subagent. Chỉ khai báo lệnh validation phù hợp với dự án đích; model tự quyết định có dùng chúng hay không.
+`max_agent_turns` là giới hạn tùy chọn cho tổng số request model trong một lượt, gồm subagent và compaction; `max_role_turns` là giới hạn tùy chọn riêng mỗi subagent. Cả hai mặc định là `null` (unlimited). Chỉ khai báo lệnh validation phù hợp với dự án đích; model tự quyết định có dùng chúng hay không.
 
 Có thể chọn model riêng cho `build`, `explore`, `architect`, `reviewer`, `compaction` trong section `models`. Tất cả dùng chung endpoint Ollama.
 
@@ -90,6 +91,7 @@ API key từ `OLLAMA_API_KEY` chỉ được tự lấy khi endpoint là `ollama
 
 - Runtime dùng một vòng lặp chung: model tự chọn tool, subagent hoặc skill theo evidence hiện có. Không còn router `brownfield`/`greenfield`, keyword bug/feature, hay chuỗi stage bắt buộc.
 - Mỗi yêu cầu có Turn lifecycle bền vững. `plan.update` là context có thể sửa, `user.question` dừng Turn để chờ cùng session trả lời, và loop guard cảnh báo/chặn tool call lặp lại không tiến triển.
+- Mặc định không có hard limit cho agent turn. Context được compact khi cần, tool loop lặp lại bị chặn và người dùng có thể ngắt bằng `Ctrl+C`. Dùng `--max-agent-turns 20` (hoặc `agent.max_agent_turns: 20`) khi chạy evaluation/benchmark cần tái lập hoặc muốn đặt ngân sách cố định.
 - `workspace.context` là tool tùy chọn, chỉ trả `cwd`, worktree Git, workspace roots, instruction-file chain và shallow tree. Nó không nhận diện ngôn ngữ, framework, package manager hay tự chọn lệnh build/test.
 - Các subagent `explore`, `architect`, `reviewer` có context riêng và profile tool hạn chế; main agent chỉ gọi khi hữu ích. Skills `issue-resolution`, `project-planning`, `test-generation`, `code-review` cũng chỉ được load khi cần.
 - Tool names công khai theo capability (`workspace.context`, `fs.read`, `patch.apply`, `test.run`, `code.definition`, `subagent`, `skill.load`). Tên cũ chỉ được giữ nội bộ để đọc trajectory cũ.

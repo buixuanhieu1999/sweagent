@@ -7,8 +7,9 @@ provider:
   timeout: 180
   # think: false # Only for models supporting this option.
 agent:
-  max_steps: 40
-  role_steps: 10
+  # null = unlimited. Use a number only for evaluation or a fixed budget.
+  max_agent_turns: null
+  max_role_turns: null
   command_timeout: 120
 compaction:
   enabled: true

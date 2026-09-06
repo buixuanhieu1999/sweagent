@@ -46,7 +46,7 @@ class RuntimeTests(unittest.TestCase):
         )
         self.config = load_config(self.root)
         self.config["provider"]["stream"] = False
-        self.config["agent"]["role_steps"] = 3
+        self.config["agent"]["max_role_turns"] = 3
         self.session = Session(self.root)
         self.tools = ToolRegistry(
             self.root,
@@ -191,6 +191,29 @@ class RuntimeTests(unittest.TestCase):
         resumed = Session(self.root, self.session.run_id)
         self.assertEqual(resumed.data["state"], "ERROR")
         self.assertEqual(len(resumed.data["journal"]), 1)
+
+    def test_agent_turns_are_unlimited_unless_configured(self):
+        self.assertIsNone(self.config["agent"]["max_agent_turns"])
+        agent = self.agent(
+            [
+                ProviderResponse(content="First response."),
+                ProviderResponse(content="Second response."),
+            ]
+        )
+        agent.run("first")
+        agent.run("second")
+        self.assertEqual(self.session.data["state"], "READY")
+
+    def test_configured_agent_turn_cap_stops_a_run(self):
+        self.config["agent"]["max_agent_turns"] = 1
+        agent = self.agent(
+            [
+                calls(("workspace.context", {})),
+                ProviderResponse(content="This request must not be made."),
+            ]
+        )
+        agent.run("inspect once then continue")
+        self.assertEqual(self.session.data["state"], "STEP_LIMIT")
 
 
 if __name__ == "__main__":

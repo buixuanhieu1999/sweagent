@@ -41,7 +41,13 @@ def load_config(repo: Path) -> dict[str, Any]:
             "keep_alive": "10m",
             "timeout": 180,
         },
-        "agent": {"max_steps": 40, "role_steps": 10, "command_timeout": 120},
+        # Agent turns are intentionally unbounded by default.  A caller can set
+        # max_agent_turns for reproducible evaluation or a fixed cost envelope.
+        "agent": {
+            "max_agent_turns": None,
+            "max_role_turns": None,
+            "command_timeout": 120,
+        },
         "compaction": {"enabled": True, "max_chars": 64000, "recent_messages": 12},
         "models": {},
         "validation": {},

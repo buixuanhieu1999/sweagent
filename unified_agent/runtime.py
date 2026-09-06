@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+from itertools import count
 
 from .agent_manager import AgentManager
 from .agents import AgentProfile, builtin_agents
@@ -110,9 +111,10 @@ class MainAgent:
 
     def chat(self, messages, role="build", tools=None, *, stream=False, schema=None):
         with self._chat_lock:
-            if self.calls >= self.config["agent"]["max_steps"]:
+            limit = self.config["agent"].get("max_agent_turns")
+            if limit is not None and self.calls >= limit:
                 raise BudgetExceeded(
-                    "Model request limit reached; the session was saved and can be resumed."
+                    "Configured agent-turn limit reached; the session was saved and can be resumed."
                 )
             self.calls += 1
             response = self.provider.chat(
@@ -160,8 +162,12 @@ class MainAgent:
                 + "\n".join(artifacts),
             },
         ]
-        summary, submitted = "Specialist reached its request budget.", False
-        for _ in range(self.config["agent"]["role_steps"]):
+        summary, submitted = "Specialist completed without a final response.", False
+        role_limit = self.config["agent"].get("max_role_turns")
+        for turn in count():
+            if role_limit is not None and turn >= role_limit:
+                summary = "Configured subagent-turn limit reached."
+                break
             response = self.chat(
                 messages, profile.name, self.tools.schemas_for(profile.tool_role)
             )
@@ -171,9 +177,15 @@ class MainAgent:
                 break
             for call in response.tool_calls:
                 tool = call.get("function", {}).get("name", "")
-                result = self.tools.execute(
-                    tool, arguments_for(call), profile.tool_role
-                )
+                arguments = arguments_for(call)
+                warning = self.loop_guard.before(tool, arguments)
+                if warning and warning.startswith("Loop detected"):
+                    result = {"ok": False, "error": warning}
+                else:
+                    result = self.tools.execute(tool, arguments, profile.tool_role)
+                self.loop_guard.record(tool, arguments, result)
+                if warning and result.get("ok"):
+                    result["warning"] = warning
                 messages.append(
                     {
                         "role": "tool",

@@ -50,7 +50,15 @@ def parse_args(argv=None):
     parser.add_argument("--model")
     parser.add_argument("--host", help="Ollama host with or without /api")
     parser.add_argument("--api-key", help="Explicit key for the chosen endpoint")
-    parser.add_argument("--max-steps", type=int)
+    parser.add_argument(
+        "--max-agent-turns",
+        type=int,
+        help="Optional model-request cap for evaluation or a fixed budget; unlimited by default",
+    )
+    # Keep old invocation scripts working without retaining it as the public name.
+    parser.add_argument(
+        "--max-steps", type=int, dest="max_agent_turns", help=argparse.SUPPRESS
+    )
     parser.add_argument("--command-timeout", type=int)
     parser.add_argument(
         "--shell", choices=("auto", "bash", "powershell", "cmd"), default="auto"
@@ -75,7 +83,7 @@ def parse_args(argv=None):
         "--output", help="Also export a portable trajectory JSON after each turn"
     )
     args = parser.parse_args(argv)
-    for key in ("max_steps", "command_timeout"):
+    for key in ("max_agent_turns", "command_timeout"):
         if getattr(args, key) is not None and getattr(args, key) < 1:
             parser.error(f"--{key.replace('_', '-')} must be positive")
     if args.resume and args.new_session:
@@ -262,12 +270,10 @@ def main(argv=None) -> int:
     for key in ("model", "host"):
         if getattr(args, key):
             settings[key] = getattr(args, key)
-    for key in ("max_steps", "command_timeout"):
+    for key in ("max_agent_turns", "command_timeout"):
         if getattr(args, key):
             config["agent"][key] = getattr(args, key)
     for section, key in (
-        ("agent", "max_steps"),
-        ("agent", "role_steps"),
         ("agent", "command_timeout"),
         ("provider", "timeout"),
         ("compaction", "max_chars"),
@@ -275,6 +281,10 @@ def main(argv=None) -> int:
     ):
         if type(config[section][key]) is not int or config[section][key] < 1:
             raise ValueError(f"{section}.{key} must be a positive integer")
+    for key in ("max_agent_turns", "max_role_turns"):
+        value = config["agent"][key]
+        if value is not None and (type(value) is not int or value < 1):
+            raise ValueError(f"agent.{key} must be a positive integer or null")
     if args.no_stream:
         settings["stream"] = False
     cloud = urllib.parse.urlsplit(settings["host"]).hostname == "ollama.com"
