@@ -215,6 +215,48 @@ class RuntimeTests(unittest.TestCase):
         agent.run("inspect once then continue")
         self.assertEqual(self.session.data["state"], "STEP_LIMIT")
 
+    def test_plan_mode_hides_mutations_and_rejects_fabricated_write(self):
+        self.session.data["collaboration_mode"] = "PLAN"
+        names = {tool["function"]["name"] for tool in self.tools.schemas_for("build")}
+        self.assertIn("plan.propose", names)
+        self.assertNotIn("fs.write", names)
+        result = self.tools.execute(
+            "fs.write", {"path": "blocked.py", "content": "x = 1\n"}
+        )
+        self.assertFalse(result["ok"])
+        self.assertFalse((self.root / "blocked.py").exists())
+
+    def test_plan_mode_persists_a_model_proposal(self):
+        self.session.data["collaboration_mode"] = "PLAN"
+        agent = self.agent(
+            [
+                calls(
+                    (
+                        "plan.propose",
+                        {
+                            "summary": "Correct the calculation.",
+                            "steps": [
+                                {
+                                    "title": "Change add",
+                                    "files": ["calc.py"],
+                                    "details": "Replace subtraction with addition.",
+                                }
+                            ],
+                            "validation": ["Run test_calc"],
+                            "open_questions": [],
+                        },
+                    )
+                ),
+                ProviderResponse(content="The proposed plan is ready."),
+            ]
+        )
+        agent.run("Plan the calculation repair")
+        self.assertEqual(
+            self.session.data["proposed_plan"]["summary"],
+            "Correct the calculation.",
+        )
+        self.assertFalse((self.root / "blocked.py").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -202,6 +202,29 @@ DEFINITIONS = [
         ["steps"],
     ),
     schema(
+        "plan_propose",
+        "Save the final implementation-ready proposed plan. Only available in Plan Mode; it never edits source files or starts implementation.",
+        {
+            "summary": S,
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": S,
+                        "files": {"type": "array", "items": S},
+                        "details": S,
+                    },
+                    "required": ["title", "files", "details"],
+                    "additionalProperties": False,
+                },
+            },
+            "validation": {"type": "array", "items": S},
+            "open_questions": {"type": "array", "items": S},
+        },
+        ["summary", "steps", "validation", "open_questions"],
+    ),
+    schema(
         "user_question",
         "Ask the user a focused question when their decision is required. This pauses the current turn until they answer.",
         {"question": S, "options": {"type": "array", "items": S}},
@@ -271,7 +294,7 @@ DEFINITIONS = [
         "agent_spawn",
         "Start an optional child agent with fresh task context. The parent may continue before waiting for it.",
         {"role": S, "task": S},
-        ["role", "task"],
+        ["task"],
     ),
     schema(
         "agent_send",
@@ -356,6 +379,7 @@ PUBLIC_NAMES = {
     "artifact": "artifact.save",
     "delegate": "subagent",
     "plan_update": "plan.update",
+    "plan_propose": "plan.propose",
     "user_question": "user.question",
     "tool_search": "tool.search",
     "web_search": "web.search",
@@ -379,6 +403,32 @@ PRIVATE_NAMES = {public: internal for internal, public in PUBLIC_NAMES.items()}
 PRIVATE_NAMES["workspace.inspect"] = "workspace_context"
 MAIN_TOOLS = {name for name in ROLE_TOOLS["engineer"] if name != "delegate"}
 HIDDEN_TOOLS = {"ast", "graph", "lsp"}
+PLAN_TOOLS = {
+    "read",
+    "glob",
+    "grep",
+    "bm25",
+    "git",
+    "code_definition",
+    "code_references",
+    "code_symbols",
+    "code_structure",
+    "code_diagnostics",
+    "skill.list",
+    "skill.load",
+    "tool_search",
+    "user_question",
+    "agent_spawn",
+    "agent_send",
+    "agent_wait",
+    "agent_resume",
+    "agent_close",
+    "web_search",
+    "web_fetch",
+    "plan_propose",
+    "workspace_context",
+}
+PLAN_MUTATIONS = {"write", "patch", "terminal", "test", "artifact", "submit"}
 
 
 def _public_schema(definition):
@@ -513,6 +563,11 @@ class ToolRegistry:
         if internal_role not in ROLE_TOOLS:
             raise PermissionError(f"Unknown tool profile: {role}")
         allowed = ROLE_TOOLS[internal_role]
+        if (
+            internal_role == "engineer"
+            and self.session.data.get("collaboration_mode") == "PLAN"
+        ):
+            allowed = allowed & PLAN_TOOLS
         enabled = set(self.session.data.setdefault("enabled_tools", []))
         visible = self.catalog.visible(allowed, enabled)
         schemas = [
@@ -531,6 +586,12 @@ class ToolRegistry:
             name = PRIVATE_NAMES.get(name, name)
             internal_role = {"build": "engineer", "explore": "explorer"}.get(role, role)
             extension = self.extensions.get(name)
+            if (
+                internal_role == "engineer"
+                and self.session.data.get("collaboration_mode") == "PLAN"
+                and name in PLAN_MUTATIONS
+            ):
+                raise PermissionError(f"Tool {name} is unavailable in Plan Mode")
             if internal_role not in ROLE_TOOLS or (
                 not extension and name not in ROLE_TOOLS[internal_role]
             ):
@@ -894,7 +955,7 @@ class ToolRegistry:
                 raise RuntimeError("Agent manager is unavailable in this context")
             if name == "agent_spawn":
                 return self.agent_manager.public(
-                    self.agent_manager.spawn(a["role"], a["task"])
+                    self.agent_manager.spawn(a.get("role", "general"), a["task"])
                 )
             if name == "agent_send":
                 self.agent_manager.send(a["agent_id"], a["message"])
@@ -918,6 +979,8 @@ class ToolRegistry:
             }
         if name == "plan_update":
             return {"steps": SessionRuntime(self.session).update_plan(a["steps"])}
+        if name == "plan_propose":
+            return {"proposed_plan": SessionRuntime(self.session).propose(a)}
         if name == "user_question":
             return {
                 "blocked": True,

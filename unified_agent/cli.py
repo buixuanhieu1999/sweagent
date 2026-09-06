@@ -15,7 +15,7 @@ from .provider import OllamaProvider
 from .repo import safe_path
 from .runtime import MainAgent
 from .tools import ToolRegistry
-from .turns import SessionRuntime, TurnState
+from .turns import CollaborationMode, SessionRuntime, TurnState
 
 HELP = """Gõ yêu cầu bằng ngôn ngữ tự nhiên để agent khám phá, sửa hoặc xây dựng project.
 
@@ -23,10 +23,18 @@ Quản lý phiên
   /help                 Hiện hướng dẫn này.
   /status               Xem trạng thái, plan, số model request và kết quả validation.
   /diff                 Xem thay đổi tích lũy của phiên, gồm cả file mới.
-  /plan                 Xem plan có thể cập nhật của phiên hiện tại.
+  /plan                 Chuyển sang Plan Mode; yêu cầu tiếp theo sẽ tạo ProposedPlan.
+  /plan show            Xem ProposedPlan đã lưu và progress plan hiện tại.
+  /plan implement       Chuyển về Default Mode và triển khai ProposedPlan đã lưu.
+  /plan clear           Xóa ProposedPlan đã lưu và trở về Default Mode.
   /queue <yêu cầu>      Xếp một yêu cầu chạy sau khi lượt hiện tại hoàn tất.
   /interrupt            Đánh dấu lượt hiện tại đã ngắt; Ctrl+C cũng dừng agent đang chạy.
   /compact              Tóm tắt lịch sử cũ, giữ lại các trao đổi tool gần đây.
+  /context              Xem ước lượng CTX/CMP và số lần context đã được compact.
+  /session list         Liệt kê các session của project.
+  /session show <id>    Xem thông tin session đã lưu.
+  /session resume <id>  Mở một session đã lưu.
+  /session delete <id>  Xóa vĩnh viễn một session đã lưu.
   /clear                Bắt đầu một cuộc hội thoại mới và vẫn giữ session cũ trên đĩa.
   /exit                 Lưu session rồi thoát.
 
@@ -185,7 +193,42 @@ def command(text, agent: MainAgent):
             + data.get("last_diff", "")
         )
     elif name == "/plan":
-        print(json.dumps(data.get("plan", []), ensure_ascii=False, indent=2))
+        runtime = SessionRuntime(agent.session)
+        if arg in {"", "start"}:
+            runtime.set_mode(CollaborationMode.PLAN)
+            print(
+                "Plan Mode enabled. Describe the task to investigate; use /plan show when ready."
+            )
+        elif arg == "show":
+            print(
+                json.dumps(
+                    {
+                        "mode": data["collaboration_mode"],
+                        "proposed_plan": data.get("proposed_plan"),
+                        "progress_plan": data.get("plan", []),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        elif arg == "clear":
+            runtime.clear_proposed_plan()
+            runtime.set_mode(CollaborationMode.DEFAULT)
+            print("Proposed plan cleared; Default Mode enabled.")
+        elif arg == "implement":
+            proposed = data.get("proposed_plan")
+            if not proposed:
+                print(
+                    "No proposed plan. Use /plan, describe the task, then use /plan show."
+                )
+            else:
+                runtime.set_mode(CollaborationMode.DEFAULT)
+                agent.run(
+                    "Implement the stored proposed plan. Inspect current files before editing, "
+                    "then validate the changes when practical."
+                )
+        else:
+            print("Usage: /plan [show|implement|clear]")
     elif name == "/queue":
         SessionRuntime(agent.session).enqueue(arg)
         print("Follow-up queued.")
@@ -193,9 +236,75 @@ def command(text, agent: MainAgent):
         SessionRuntime(agent.session).state(TurnState.INTERRUPTED)
         data["state"] = "INTERRUPTED"
         print("Turn marked interrupted. Describe how to continue when ready.")
-    elif name == "/compact":
-        agent.calls = 0
-        print(agent.compact())
+    elif name in {"/compact", "/context"}:
+        if name == "/context":
+            current = len(json.dumps(data["messages"], ensure_ascii=False)) // 4
+            window = agent.config["compaction"].get("context_window_tokens", 128000)
+            threshold = agent.config["compaction"].get(
+                "auto_compact_tokens", agent.config["compaction"]["max_chars"] // 4
+            )
+            print(
+                json.dumps(
+                    {
+                        "estimated": True,
+                        "current_tokens": current,
+                        "context_window_tokens": window,
+                        "context_usage_percent": round(100 * current / window, 1),
+                        "auto_compact_tokens": threshold,
+                        "compact_progress_percent": round(100 * current / threshold, 1),
+                        "tokens_until_compact": max(0, threshold - current),
+                        "compactions": len(data.get("compaction_events", [])),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            agent.calls = 0
+            print(agent.compact())
+    elif name == "/session":
+        action, _, identifier = arg.partition(" ")
+        identifier = identifier.strip()
+        if action == "list":
+            print(
+                json.dumps(
+                    Session.list(agent.session.root), ensure_ascii=False, indent=2
+                )
+            )
+        elif action == "show" and identifier:
+            selected = Session(agent.session.root, identifier)
+            print(
+                json.dumps(
+                    {
+                        key: selected.data.get(key)
+                        for key in (
+                            "run_id",
+                            "state",
+                            "turn",
+                            "summary",
+                            "plan",
+                            "proposed_plan",
+                        )
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        elif action == "resume" and identifier:
+            if not (
+                agent.session.root / ".agent" / "runs" / identifier / "state.json"
+            ).is_file():
+                print("Unknown session ID.")
+            else:
+                return "resume:" + identifier
+        elif action == "delete" and identifier:
+            if identifier == agent.session.run_id:
+                print("Cannot delete the active session. Switch sessions first.")
+            else:
+                Session.delete(agent.session.root, identifier)
+                print("Session deleted.")
+        else:
+            print("Usage: /session list|show <id>|resume <id>|delete <id>")
     elif name == "/memory":
         if arg:
             path = agent.session.root / ".agent" / "memory" / "experience.jsonl"
@@ -289,6 +398,8 @@ def main(argv=None) -> int:
         ("provider", "timeout"),
         ("compaction", "max_chars"),
         ("compaction", "recent_messages"),
+        ("compaction", "context_window_tokens"),
+        ("compaction", "auto_compact_tokens"),
     ):
         if type(config[section][key]) is not int or config[section][key] < 1:
             raise ValueError(f"{section}.{key} must be a positive integer")
@@ -393,6 +504,9 @@ def main(argv=None) -> int:
                 if action == "clear":
                     agent = make_agent()
                     print("Started a new session; previous session remains saved.")
+                if action.startswith("resume:"):
+                    agent = make_agent(action.removeprefix("resume:"))
+                    print(f"Resumed session {agent.session.run_id}.")
             else:
                 agent.run(text)
                 while agent.session.data["state"] == "READY":

@@ -4,6 +4,7 @@ import base64
 import difflib
 import json
 import sqlite3
+import shutil
 from contextlib import closing
 import uuid
 from datetime import datetime, timezone
@@ -148,6 +149,39 @@ class Session:
         return (
             max(states, key=lambda p: p.stat().st_mtime).parent.name if states else None
         )
+
+    @staticmethod
+    def list(root: Path) -> list[dict]:
+        records = []
+        for path in (root / ".agent" / "runs").glob("*/state.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                records.append(
+                    {
+                        "id": path.parent.name,
+                        "status": data.get("state", "UNKNOWN"),
+                        "turn": data.get("turn", 0),
+                        "updated_at": datetime.fromtimestamp(
+                            path.stat().st_mtime, timezone.utc
+                        ).isoformat(),
+                        "summary": data.get("summary", ""),
+                    }
+                )
+            except (OSError, ValueError, KeyError):
+                continue
+        return sorted(records, key=lambda item: item["updated_at"], reverse=True)
+
+    @staticmethod
+    def delete(root: Path, run_id: str) -> None:
+        directory = safe_path(root, f".agent/runs/{run_id}", internal=True)
+        if directory.parent != root / ".agent" / "runs" or not directory.is_dir():
+            raise ValueError("Unknown session ID")
+        shutil.rmtree(directory)
+        with closing(sqlite3.connect(root / ".agent" / "sessions.sqlite3")) as db:
+            db.execute("DELETE FROM messages WHERE run_id=?", (run_id,))
+            db.execute("DELETE FROM checkpoints WHERE run_id=?", (run_id,))
+            db.execute("DELETE FROM sessions WHERE run_id=?", (run_id,))
+            db.commit()
 
 
 def snapshot(root: Path) -> dict[str, str]:

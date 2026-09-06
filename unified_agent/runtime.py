@@ -18,7 +18,7 @@ from .memory import History, Session, compact, diff_snapshots, snapshot
 from . import workspace
 from .terminal import select_shell
 from .tools import ToolRegistry
-from .turns import SessionRuntime, ToolLoopGuard, TurnState
+from .turns import CollaborationMode, SessionRuntime, ToolLoopGuard, TurnState
 
 SYSTEM = """You are an interactive coding agent operating in the user's current workspace.
 Respond in the user's language and preserve their constraints across the session.
@@ -38,6 +38,13 @@ Respond in the user's language and preserve their constraints across the session
 
 Finish with a normal response when work is complete. `submit` is optional and
 only records a concise completion summary; it does not replace honest reporting.
+"""
+
+PLAN_MODE = """\nYou are in Plan Mode. Investigate only as needed and produce an
+implementation-ready proposal. Do not modify source files, run tests, or claim to
+have implemented anything. You may ask focused questions and delegate research.
+When the proposal is ready, call `plan.propose` with summary, steps, validation,
+and open_questions. The user can later choose `/plan implement` to begin work.
 """
 
 
@@ -92,6 +99,12 @@ class MainAgent:
             text += "\nCurrent mutable plan (context only):\n" + json.dumps(
                 plan, ensure_ascii=False
             )
+        if proposed := self.session.data.get("proposed_plan"):
+            text += "\nStored proposed plan:\n" + json.dumps(
+                proposed, ensure_ascii=False
+            )
+        if self.session.data.get("collaboration_mode") == CollaborationMode.PLAN:
+            text += PLAN_MODE
         return text + ("\nDelegated role:\n" + profile.prompt if profile else "")
 
     def state(self, name: str):
@@ -231,12 +244,12 @@ class MainAgent:
         try:
             while True:
                 settings = self.config["compaction"]
-                if (
-                    settings["enabled"]
-                    and len(json.dumps(data["messages"], ensure_ascii=False))
-                    > settings["max_chars"]
+                if settings["enabled"] and len(
+                    json.dumps(data["messages"], ensure_ascii=False)
+                ) // 4 > settings.get(
+                    "auto_compact_tokens", settings["max_chars"] // 4
                 ):
-                    self.compact()
+                    self.compact(auto=True)
                 response = self.chat(
                     data["messages"],
                     "build",
@@ -305,7 +318,7 @@ class MainAgent:
         self.emit(f"Session: {self.session.path}")
         return data["summary"]
 
-    def compact(self):
+    def compact(self, *, auto=False):
         agent = self
 
         class Adapter:
@@ -313,10 +326,24 @@ class MainAgent:
                 return agent.chat(messages, "compaction")
 
         data = self.session.data
+        before_tokens = len(json.dumps(data["messages"], ensure_ascii=False)) // 4
         data["messages"], checkpoint = compact(
             data["messages"], Adapter(), self.config["compaction"]["recent_messages"]
         )
         if checkpoint:
             self.session.artifact("checkpoint.md", checkpoint)
+            event = {
+                "before_tokens": before_tokens,
+                "after_tokens": len(json.dumps(data["messages"], ensure_ascii=False))
+                // 4,
+                "turn_id": (self.runtime.active() or {}).get("id"),
+                "automatic": auto,
+            }
+            data.setdefault("compaction_events", []).append(event)
+            if auto:
+                self.emit(
+                    "[context compacted: "
+                    f"{event['before_tokens']} -> {event['after_tokens']} estimated tokens]"
+                )
             self.session.save()
         return checkpoint or "Context is already compact."

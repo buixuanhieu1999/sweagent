@@ -35,6 +35,12 @@ def builtin_agents() -> AgentRegistry:
     return AgentRegistry(
         (
             AgentProfile(
+                "general",
+                "Focused delegated task with normal coding capabilities.",
+                "Complete the delegated task with concise evidence and report the result.",
+                "engineer",
+            ),
+            AgentProfile(
                 "explore",
                 "Focused workspace investigation with concise evidence.",
                 "Investigate the delegated question using evidence. Report concise findings with paths, symbols, relationships, and uncertainties. Do not modify source files.",

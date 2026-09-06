@@ -3,7 +3,12 @@ import unittest
 from pathlib import Path
 
 from unified_agent.memory import Session
-from unified_agent.turns import SessionRuntime, ToolLoopGuard, TurnState
+from unified_agent.turns import (
+    CollaborationMode,
+    SessionRuntime,
+    ToolLoopGuard,
+    TurnState,
+)
 
 
 class TurnRuntimeTests(unittest.TestCase):
@@ -39,6 +44,40 @@ class TurnRuntimeTests(unittest.TestCase):
         answer = self.runtime.answer("yes")
         self.assertIn("yes", answer)
         self.assertEqual(self.runtime.active()["id"], turn["id"])
+
+    def test_plan_mode_and_proposed_plan_are_persisted_separately(self):
+        self.runtime.set_mode(CollaborationMode.PLAN)
+        proposed = self.runtime.propose(
+            {
+                "summary": "Add a health endpoint.",
+                "steps": [
+                    {
+                        "title": "Add route",
+                        "files": ["app.py"],
+                        "details": "Register GET /health.",
+                    }
+                ],
+                "validation": ["Run unit tests"],
+                "open_questions": [],
+            }
+        )
+        self.assertEqual(
+            self.session.data["collaboration_mode"], CollaborationMode.PLAN
+        )
+        self.assertEqual(self.session.data["proposed_plan"], proposed)
+        self.assertEqual(self.session.data["plan"], [])
+
+    def test_session_list_and_delete(self):
+        other = Session(self.session.root)
+        records = Session.list(self.session.root)
+        self.assertEqual(
+            {record["id"] for record in records}, {self.session.run_id, other.run_id}
+        )
+        Session.delete(self.session.root, other.run_id)
+        self.assertEqual(
+            [record["id"] for record in Session.list(self.session.root)],
+            [self.session.run_id],
+        )
 
     def test_loop_guard_warns_then_blocks_identical_calls(self):
         guard = ToolLoopGuard(self.session)

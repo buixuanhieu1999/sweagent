@@ -180,10 +180,18 @@ Khi mở tương tác, CLI phát hiện phiên chưa xong và cho phép khôi ph
 | `/test` | Chạy các lệnh validation được khai báo trong `.agent/config.yaml`. |
 | `/test <lệnh>` | Chạy một lệnh test cụ thể, ví dụ `/test npm test`. |
 | `/review` | Review thay đổi hiện tại |
-| `/plan` | Xem plan mutable hiện tại |
+| `/plan` | Chuyển sang Plan Mode. Yêu cầu tiếp theo chỉ khảo sát và tạo `ProposedPlan`; source mutation bị chặn. |
+| `/plan show` | Xem `ProposedPlan` đã lưu cùng progress plan hiện tại. |
+| `/plan implement` | Chuyển về Default Mode và bắt đầu một turn triển khai `ProposedPlan`. |
+| `/plan clear` | Xóa `ProposedPlan` và trở về Default Mode. |
 | `/queue <yêu cầu>` | Xếp follow-up theo FIFO để chạy sau Turn hiện tại. |
 | `/interrupt` | Đánh dấu Turn interrupted; `Ctrl+C` dừng work đang chạy. |
 | `/compact` | Thu gọn ngữ cảnh cũ và giữ trao đổi tool gần đây. |
+| `/context` | Hiện ước lượng token hiện tại, CTX %, CMP %, ngưỡng auto-compact và số lần compact. |
+| `/session list` | Liệt kê mọi session đã lưu của project. |
+| `/session show <id>` | Xem trạng thái, tóm tắt, plan và ProposedPlan của session. |
+| `/session resume <id>` | Chuyển terminal sang session đã lưu. |
+| `/session delete <id>` | Xóa vĩnh viễn session đã lưu; không thể xóa session đang mở. |
 | `/memory` | Tra cứu experience có liên quan đến các yêu cầu đã gửi. |
 | `/memory <ghi chú>` | Lưu một bài học hoặc quy tắc cho project. |
 | `/model` | Xem model chính của session. |
@@ -195,6 +203,8 @@ Khi mở tương tác, CLI phát hiện phiên chưa xong và cho phép khôi ph
 | `/exit` | Lưu và thoát |
 
 Sau `Ctrl+C` hoặc lỗi tạm thời của provider, gõ `continue` hoặc `tiếp tục` như một yêu cầu bình thường để agent tiếp tục. Các lệnh trên chỉ hoạt động trong terminal tương tác; chúng không phải command PowerShell.
+
+Plan Mode dùng cùng model chính và vẫn cho phép đọc file, tìm kiếm, code intelligence, Git read-only, skills, web, user question và optional child agents. Nó không tự ép model lập kế hoạch ở Default Mode và không tự triển khai các bước của `ProposedPlan`; chỉ `/plan implement` mới bắt đầu một turn implementation mới. `plan.update` vẫn là progress state độc lập với `ProposedPlan`.
 
 Undo/redo kiểm tra nội dung hiện tại của tất cả file trước khi sửa, từ chối nếu có thay đổi tiếp theo của người dùng. Không rollback package cài toàn cục, network, database hay git state. Snapshot bỏ qua file >1 MB, thư mục sinh tự động và secret files; ngân sách snapshot là 32 MB/10.000 file. Với repo lớn, các giới hạn này cũng giới hạn phạm vi diff/undo. Agent không dùng git reset để undo.
 
