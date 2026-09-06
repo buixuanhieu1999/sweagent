@@ -43,6 +43,12 @@ Với prompt dài hoặc nhiều dòng, dùng `-TaskFile` để giữ nguyên n�
 .\start-agent.ps1 -Repo "C:\code\my-project" -FullAccess -TaskFile .\.agent\requests\task.txt
 ```
 
+Tiếp tục đúng session đã lưu và giữ context/tool history bằng `-Resume`:
+
+```powershell
+.\start-agent.ps1 -Repo "C:\code\my-project" -FullAccess -Resume "RUN_ID" -Task "Continue the saved task."
+```
+
 Sau đó nhập tự nhiên:
 
 ```text
@@ -84,6 +90,7 @@ provider:
   model: nemotron-3-ultra:cloud
   stream: true
   keep_alive: 10m
+  timeout: 600 # Phù hợp Cloud reasoning model có phản hồi đầu tiên chậm.
 agent:
   # null = unlimited. Set a number only for evaluation or a fixed budget.
   max_agent_turns: null

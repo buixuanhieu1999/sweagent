@@ -4,7 +4,7 @@ provider:
   model: nemotron-3-ultra:cloud
   stream: true
   keep_alive: 10m
-  timeout: 180
+  timeout: 600
   # think: false # Only for models supporting this option.
 agent:
   # null = unlimited. Use a number only for evaluation or a fixed budget.

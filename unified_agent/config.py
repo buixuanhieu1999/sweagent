@@ -39,7 +39,7 @@ def load_config(repo: Path) -> dict[str, Any]:
             "model": DEFAULT_MODEL,
             "stream": True,
             "keep_alive": "10m",
-            "timeout": 180,
+            "timeout": 600,
         },
         # Agent turns are intentionally unbounded by default.  A caller can set
         # max_agent_turns for reproducible evaluation or a fixed cost envelope.

@@ -51,7 +51,7 @@ class OllamaProvider:
         model: str,
         host: str,
         api_key: str | None = None,
-        timeout: int = 180,
+        timeout: int = 600,
         keep_alive: str = "10m",
         think: Any = None,
     ):
