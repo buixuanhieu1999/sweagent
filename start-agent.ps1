@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$Host.UI.RawUI.WindowTitle = 'SWE Agent - Ollama Cloud - nemotron-3-ultra:cloud'
+$Host.UI.RawUI.WindowTitle = 'SWE Agent - Ollama Cloud - nemotron-3-super:cloud'
 
 Push-Location -LiteralPath $PSScriptRoot
 try {
@@ -14,7 +14,7 @@ try {
         '-B', '-u', "$PSScriptRoot\agent.py",
         '--repo', $Repo,
         '--host', 'https://ollama.com/api',
-        '--model', 'nemotron-3-ultra:cloud'
+        '--model', 'nemotron-3-super:cloud'
     )
     if ($FullAccess) {
         $agentArgs += '--full-access'

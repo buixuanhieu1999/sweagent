@@ -1,7 +1,7 @@
 provider:
   type: ollama
   host: https://ollama.com/api
-  model: nemotron-3-ultra:cloud
+  model: nemotron-3-super:cloud
   stream: true
   keep_alive: 10m
   timeout: 180
