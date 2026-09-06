@@ -1,7 +1,8 @@
 param(
     [string]$Repo = $PSScriptRoot,
     [switch]$FullAccess,
-    [string]$Task
+    [string]$Task,
+    [string]$TaskFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,6 +12,12 @@ $Host.UI.RawUI.WindowTitle = 'SWE Agent - Ollama Cloud - nemotron-3-ultra:cloud'
 
 Push-Location -LiteralPath $PSScriptRoot
 try {
+    if ($Task -and $TaskFile) {
+        throw 'Use either -Task or -TaskFile, not both.'
+    }
+    if ($TaskFile) {
+        $Task = Get-Content -LiteralPath $TaskFile -Raw -Encoding utf8
+    }
     $agentArgs = @(
         '-B', '-u', "$PSScriptRoot\agent.py",
         '--repo', $Repo,

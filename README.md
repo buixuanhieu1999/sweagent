@@ -37,6 +37,12 @@ agent --repo "C:\Users\AD\Downloads\a" --full-access
 .\start-agent.ps1 -Repo "C:\code\my-project" -FullAccess -Task "Inspect and improve this project."
 ```
 
+Với prompt dài hoặc nhiều dòng, dùng `-TaskFile` để giữ nguyên nội dung:
+
+```powershell
+.\start-agent.ps1 -Repo "C:\code\my-project" -FullAccess -TaskFile .\.agent\requests\task.txt
+```
+
 Sau đó nhập tự nhiên:
 
 ```text
