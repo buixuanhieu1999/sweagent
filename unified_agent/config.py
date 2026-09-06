@@ -53,7 +53,7 @@ def load_config(repo: Path) -> dict[str, Any]:
             "max_chars": 64000,
             "recent_messages": 12,
             "context_window_tokens": 128000,
-            "auto_compact_tokens": 16000,
+            "auto_compact_tokens": 96000,
         },
         "models": {},
         "validation": {},

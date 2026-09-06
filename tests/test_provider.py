@@ -1,6 +1,8 @@
 import json
 import unittest
+from io import BytesIO
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from unified_agent.provider import OllamaProvider
 
@@ -98,3 +100,20 @@ class ProviderTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 OllamaProvider("test", url)
+
+    def test_transient_cloud_error_retries_before_failing(self):
+        failure = HTTPError("https://ollama.com/api/chat", 500, "error", {}, BytesIO())
+        with (
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[
+                    failure,
+                    Response([{"message": {"content": "OK"}, "done": True}]),
+                ],
+            ) as request,
+            patch("unified_agent.provider.time.sleep") as sleep,
+        ):
+            result = OllamaProvider("test", "https://ollama.com/api").chat([])
+        self.assertEqual(result.content, "OK")
+        self.assertEqual(request.call_count, 2)
+        sleep.assert_called_once_with(1)

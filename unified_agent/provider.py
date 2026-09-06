@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -117,9 +118,18 @@ class OllamaProvider:
         indexed: dict[int, dict] = {}
         finished = False
         try:
-            with urllib.request.urlopen(
-                self._request("/chat", payload), timeout=self.timeout
-            ) as response:
+            response = None
+            for attempt in range(3):
+                try:
+                    response = urllib.request.urlopen(
+                        self._request("/chat", payload), timeout=self.timeout
+                    )
+                    break
+                except urllib.error.HTTPError as exc:
+                    if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                        raise
+                    time.sleep(2**attempt)
+            with response:
                 chunks = response if stream else [response.read()]
                 for raw in chunks:
                     if not raw.strip():
